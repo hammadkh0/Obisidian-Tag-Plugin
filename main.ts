@@ -15,6 +15,16 @@ export default class TagFlowPlugin extends Plugin {
 	hasSelectedTag = false;
 	tagChanged = false;
 
+	async filterContent(file: TFile) {
+		const content = await this.app.vault.read(file);
+		// Define a regular expression pattern to match the anchor tags
+		const anchorTagPattern =
+			/<!--tag-list\s[^>]+-->[\s\S]*?<!--end-tag-list\s[^>]+-->/g;
+		// Remove all anchor tags using the replace() method with the pattern
+		const cleanedContent = content.replace(anchorTagPattern, "");
+		return cleanedContent;
+	}
+
 	async onload() {
 		console.log("Plugin loaded");
 		await this.loadData();
@@ -47,57 +57,73 @@ export default class TagFlowPlugin extends Plugin {
 				this.updateLists();
 			}
 		});
-
+		this.registerEvent(
+			this.app.vault.on("create", (file) => {
+				console.log("new file created in the vault ");
+				this.addToCache();
+			})
+		);
 		// Update the cache whenever a file is modified
 		this.registerEvent(
 			this.app.vault.on("modify", async (file) => {
-				if (file instanceof TFile) {
-					if (file.basename === "tagFlowData") return;
+				if (!(file instanceof TFile)) {
+					return;
+				}
+				if (file.basename === "tagFlowData") return;
 
-					const content = await this.app.vault.read(file);
-					const newTags = new Set(
-						content.match(/#([a-zA-Z0-9_-]+)/g)
-					);
+				const cleanedContent = await this.filterContent(file);
 
-					// Check if any tag has been changed
-					const oldTags = this.tagCache.get(file.path);
-					this.tagChanged = false;
-					const obsoleteTags: string[] = [];
-					if (oldTags) {
-						// iterate through the tags in the tag cache for the currently modified file
-						for (const oldTag of oldTags) {
-							if (!newTags.has(oldTag)) {
-								// if the new tags that are matches through regex don't contain the old tag of the cache, then add them to the obsolete array as they are no longer needed
-								this.tagChanged = true;
-								obsoleteTags.push(oldTag);
-								break;
-							}
+				const newTags = new Set(
+					cleanedContent.match(/#([a-zA-Z0-9_-]+)/g)
+				);
+				// Check if any tag has been changed
+				const oldTags = this.tagCache.get(file.path);
+				this.tagChanged = false;
+
+				const obsoleteTags: string[] = [];
+				if (oldTags) {
+					// iterate through the tags in the tag cache for the currently modified file
+					for (const oldTag of oldTags) {
+						if (!newTags.has(oldTag)) {
+							// if the new tags that are matches through regex don't contain the old tag of the cache, then add them to the obsolete array as they are no longer needed
+							this.tagChanged = true;
+							obsoleteTags.push(oldTag);
+							break;
 						}
 					}
-					console.log({ newTags, oldTags });
-
-					if (this.tagChanged) {
-						console.log("tag changed");
-						// set the new tags in the tag cache to update it
-						this.tagCache.set(file.path, new Set(newTags));
-						// find the old tags from the tagList[] that have now been modified
-						const deletionList = this.lists
-							.map((list) => {
-								// check the obsolete list to see if the tag is there
-								return obsoleteTags.includes(list.tag)
-									? list
-									: null;
-							})
-							// .filer(Boolean) will filter the null values. "as" keyword will cast the type as TagList[]
-							.filter(Boolean) as TagList[];
-						// delete the list that was made with the obsolete tag
-						console.log("deleting lists");
-
-						deletionList.forEach((list) =>
-							this.deleteList(list, file, content)
-						);
-					}
 				}
+				console.log({ newTags, oldTags });
+				console.log({ lists: this.lists });
+
+				console.log({ obsoleteTags });
+
+				if (this.tagChanged) {
+					console.log("tag changed");
+					// set the new tags in the tag cache to update it
+					this.tagCache.set(file.path, new Set(newTags));
+
+					// TODO: Check If deletion is good or udpate
+					// !delete the list that was made with the obsolete tag
+					// find the old tags from the tagList[] that have now been modified
+					// const deletionList = this.lists
+					// 	.map((list) => {
+					// 		// check the obsolete list to see if the tag is there
+					// 		return obsoleteTags.includes(list.tag)
+					// 			? list
+					// 			: null;
+					// 	})
+					// 	// .filer(Boolean) will filter the null values. "as" keyword will cast the type as TagList[]
+					// 	.filter(Boolean) as TagList[];
+
+					// console.log("deleting lists");
+					// console.log({ deletionList });
+
+					// deletionList.forEach((list) =>
+					// 	this.deleteList(list, file, cleanedContent)
+					// );
+					this.updateLists();
+				}
+
 				if (this.hasSelectedTag) {
 					this.updateLists();
 				}
@@ -107,12 +133,6 @@ export default class TagFlowPlugin extends Plugin {
 		setInterval(() => {
 			this.updateLists();
 		}, 60 * 60 * 1000);
-
-		// this.app.workspace.onLayoutReady(async () => {
-		// 	await this.loadData();
-		// });
-
-		// this.updateLists();
 	}
 
 	async deleteList(
@@ -191,21 +211,69 @@ export default class TagFlowPlugin extends Plugin {
 				id: id,
 			});
 			this.hasSelectedTag = true;
-			// await this.updateLists();
 			await this.saveData();
 		}
 	}
 
-	// async handleFileChange(file: TFile) {
-	// 	// const file = this.app.workspace.getActiveFile();
-	// 	// if (file instanceof TFile) {
-	// 	// this.allTags = await this.fetchAllTags();
-	// 	const content = await this.app.vault.read(file);
-	// 	if (content.includes("<!--tag-list")) {
-	// 		console.log("gonna update the list lmao");
-	// 		await this.updateLists();
-	// 	}
-	// }
+	alreadyExistingHyperlinks(
+		startIndex: number,
+		endIndex: number,
+		content: string,
+		startAnchor: string,
+		links: string
+	) {
+		if (startIndex !== -1 && endIndex !== -1) {
+			// Extract the content between startAnchor and endAnchor
+			const extractedContent = content.substring(
+				startIndex + startAnchor.length,
+				endIndex
+			);
+			console.log({ extractedContent }, { markdownLinks: links });
+
+			if (links.length > 0 && extractedContent.includes(links)) {
+				// the hyperlinks for tags inside the anchors are not modified so dont modify them
+				console.log("Existing tags found for the tag: " + links);
+
+				return true;
+			}
+		}
+		return false;
+	}
+	async replaceAnchorContents(
+		startIndex: number,
+		endIndex: number,
+		content: string,
+		startAnchor: string,
+		endAnchor: string,
+		links: string,
+		note: TFile
+	) {
+		if (startIndex >= 0) {
+			if (endIndex >= 0) {
+				// If the end anchor exists, replace the content between start and end anchors
+				content =
+					content.substring(0, startIndex) +
+					startAnchor +
+					"\n" +
+					links +
+					"\n" +
+					endAnchor +
+					content.substring(endIndex + endAnchor.length);
+			} else {
+				// If the end anchor does not exist, insert it after the list
+				content =
+					content.substring(0, startIndex) +
+					startAnchor +
+					"\n" +
+					links +
+					"\n" +
+					endAnchor +
+					content.substring(startIndex + startAnchor.length);
+			}
+			// ! Check modify vs process
+			await this.app.vault.modify(note, content);
+		}
+	}
 
 	async updateLists() {
 		console.log("update list");
@@ -213,56 +281,65 @@ export default class TagFlowPlugin extends Plugin {
 			console.log("no lists");
 			return;
 		}
-
-		//TODO: check this line
 		this.hasSelectedTag = false;
 
 		// get all the markdown files in the vault.
 		const markdownFiles = this.app.vault.getMarkdownFiles();
+
 		for (const list of this.lists) {
 			// Use the tag cache to find the files that contain the tag from tag list
 			const filesWithTag = markdownFiles.filter((file) => {
 				const tags = this.tagCache.get(file.path);
 				return tags && tags.has(list.tag);
 			});
+			console.log({ filesWithTag });
 
+			/**
+			 * Find all the file names that contain the current tag being iterated
+			 * For example: IF files like A.md and B.md contain the tag #apple, then both fileNames will be added to the links string
+			 * The names will be added in [[fileName]] format to create hyperlink to take to that file
+			 * */
 			const links = filesWithTag
 				.map((file) => `[[${file.basename}]]`)
 				.join("\n");
 
-			const note = this.app.vault.getAbstractFileByPath(
-				list.notePath
-			) as TFile;
-			let content = await this.app.vault.read(note);
+			// Get the currently opened file as activeLeaf
+			const activeLeaf = this.app.workspace.activeLeaf?.view;
+			// If activeLeaf is not a MarkdownView then return it;
+			if (!(activeLeaf instanceof MarkdownView)) {
+				return;
+			}
+			const file = activeLeaf.file;
+			// Read the contents of the currently opened file
+			const content = await this.app.vault.read(file);
+			// Get the anchor tags & the index for the currently iterated list
 			const startAnchor = `<!--tag-list ${list.tag} ${list.id}-->`;
 			const endAnchor = `<!--end-tag-list ${list.tag} ${list.id}-->`;
 			const startIndex = content.indexOf(startAnchor);
 			const endIndex = content.indexOf(endAnchor);
-			if (startIndex >= 0) {
-				if (endIndex >= 0) {
-					// If the end anchor exists, replace the content between start and end anchors
-					content =
-						content.substring(0, startIndex) +
-						startAnchor +
-						"\n" +
-						links +
-						"\n" +
-						endAnchor +
-						content.substring(endIndex + endAnchor.length);
-				} else {
-					// If the end anchor does not exist, insert it after the list
-					content =
-						content.substring(0, startIndex) +
-						startAnchor +
-						"\n" +
-						links +
-						"\n" +
-						endAnchor +
-						content.substring(startIndex + startAnchor.length);
-				}
 
-				await this.app.vault.modify(note, content);
+			// * check if the links are same as the links between anchor tags
+			const existingHyperlinks = this.alreadyExistingHyperlinks(
+				startIndex,
+				endIndex,
+				content,
+				startAnchor,
+				links
+			);
+			if (existingHyperlinks) {
+				continue;
 			}
+			console.log("gonna replace the tags");
+
+			await this.replaceAnchorContents(
+				startIndex,
+				endIndex,
+				content,
+				startAnchor,
+				endAnchor,
+				links,
+				file
+			);
 		}
 	}
 
@@ -302,14 +379,16 @@ export default class TagFlowPlugin extends Plugin {
 
 		await Promise.all(
 			this.app.vault.getMarkdownFiles().map(async (file) => {
-				const content = await this.app.vault.read(file);
-				const matches = content.match(/#([a-zA-Z0-9_-]+)/g);
+				const cleanedContent = await this.filterContent(file);
+				const matches = cleanedContent.match(/#([a-zA-Z0-9_-]+)/g);
 
 				const notePath = file.path;
 				tagMap.set(notePath, new Set(matches));
 			})
 		);
+
 		this.tagCache = tagMap;
+		console.log(this.tagCache);
 	}
 
 	onunload() {
