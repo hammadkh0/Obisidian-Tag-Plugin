@@ -80,14 +80,11 @@ export default class TagFlowPlugin extends Plugin {
 				const oldTags = this.tagCache.get(file.path);
 				this.tagChanged = false;
 
-				const obsoleteTags: string[] = [];
 				if (oldTags) {
 					// iterate through the tags in the tag cache for the currently modified file
-					for (const oldTag of oldTags) {
-						if (!newTags.has(oldTag)) {
-							// if the new tags that are matches through regex don't contain the old tag of the cache, then add them to the obsolete array as they are no longer needed
+					for (const newTag of newTags) {
+						if (!oldTags.has(newTag)) {
 							this.tagChanged = true;
-							obsoleteTags.push(oldTag);
 							break;
 						}
 					}
@@ -95,32 +92,9 @@ export default class TagFlowPlugin extends Plugin {
 				console.log({ newTags, oldTags });
 				console.log({ lists: this.lists });
 
-				console.log({ obsoleteTags });
-
+				this.tagCache.set(file.path, new Set(newTags));
 				if (this.tagChanged) {
 					console.log("tag changed");
-					// set the new tags in the tag cache to update it
-					this.tagCache.set(file.path, new Set(newTags));
-
-					// TODO: Check If deletion is good or udpate
-					// !delete the list that was made with the obsolete tag
-					// find the old tags from the tagList[] that have now been modified
-					// const deletionList = this.lists
-					// 	.map((list) => {
-					// 		// check the obsolete list to see if the tag is there
-					// 		return obsoleteTags.includes(list.tag)
-					// 			? list
-					// 			: null;
-					// 	})
-					// 	// .filer(Boolean) will filter the null values. "as" keyword will cast the type as TagList[]
-					// 	.filter(Boolean) as TagList[];
-
-					// console.log("deleting lists");
-					// console.log({ deletionList });
-
-					// deletionList.forEach((list) =>
-					// 	this.deleteList(list, file, cleanedContent)
-					// );
 					this.updateLists();
 				}
 
@@ -230,8 +204,8 @@ export default class TagFlowPlugin extends Plugin {
 			);
 			console.log({ extractedContent }, { markdownLinks: links });
 
-			if (links.length > 0 && extractedContent.includes(links)) {
-				// the hyperlinks for tags inside the anchors are not modified so dont modify them
+			if (links.length > 0 && extractedContent === links) {
+				// the hyperlinks for tags inside the anchors are not modified so dont modify them again
 				console.log("Existing tags found for the tag: " + links);
 
 				return true;
@@ -283,10 +257,20 @@ export default class TagFlowPlugin extends Plugin {
 		}
 		this.hasSelectedTag = false;
 
-		// get all the markdown files in the vault.
 		const markdownFiles = this.app.vault.getMarkdownFiles();
+		// Get the currently opened file as activeLeaf
+		const activeLeaf = this.app.workspace.activeLeaf?.view;
+		if (!(activeLeaf instanceof MarkdownView)) {
+			return;
+		}
+		const file = activeLeaf.file;
 
-		for (const list of this.lists) {
+		// filtering out those tag-lists from this.lists that are only present in the currently opened file
+		const extractedLists = this.lists.filter(
+			(list) => list.notePath === file.path
+		);
+
+		for (const list of extractedLists) {
 			// Use the tag cache to find the files that contain the tag from tag list
 			const filesWithTag = markdownFiles.filter((file) => {
 				const tags = this.tagCache.get(file.path);
@@ -294,31 +278,19 @@ export default class TagFlowPlugin extends Plugin {
 			});
 			console.log({ filesWithTag });
 
-			/**
-			 * Find all the file names that contain the current tag being iterated
-			 * For example: IF files like A.md and B.md contain the tag #apple, then both fileNames will be added to the links string
-			 * The names will be added in [[fileName]] format to create hyperlink to take to that file
-			 * */
 			const links = filesWithTag
 				.map((file) => `[[${file.basename}]]`)
 				.join("\n");
 
-			// Get the currently opened file as activeLeaf
-			const activeLeaf = this.app.workspace.activeLeaf?.view;
-			// If activeLeaf is not a MarkdownView then return it;
-			if (!(activeLeaf instanceof MarkdownView)) {
-				return;
-			}
-			const file = activeLeaf.file;
-			// Read the contents of the currently opened file
+			// * Read the contents of the currently opened file
 			const content = await this.app.vault.read(file);
-			// Get the anchor tags & the index for the currently iterated list
+			// * Get the anchor tags & the index for the currently iterated list
 			const startAnchor = `<!--tag-list ${list.tag} ${list.id}-->`;
 			const endAnchor = `<!--end-tag-list ${list.tag} ${list.id}-->`;
 			const startIndex = content.indexOf(startAnchor);
 			const endIndex = content.indexOf(endAnchor);
 
-			// * check if the links are same as the links between anchor tags
+			// * Check if the links are same as the links between anchor tags
 			const existingHyperlinks = this.alreadyExistingHyperlinks(
 				startIndex,
 				endIndex,
