@@ -69,13 +69,14 @@ export default class TagFlowPlugin extends Plugin {
 					return;
 				}
 				console.log("File Deleted: ", file.name, file.path);
-				const listToBeDeleted = this.lists.filter((tagList) => {
-					return tagList.notePath === file.path;
-				});
+				this.lists = this.lists
+					.map((tagList) => {
+						if (tagList.notePath !== file.path) {
+							return tagList;
+						}
+					})
+					.filter(Boolean) as TagList[];
 
-				listToBeDeleted.forEach((list) => {
-					this.lists = this.lists.filter((l) => l !== list);
-				});
 				await this.saveData();
 			})
 		);
@@ -107,6 +108,7 @@ export default class TagFlowPlugin extends Plugin {
 				}
 				console.log({ newTags, oldTags });
 				console.log({ lists: this.lists });
+				console.log({ tagCache: this.tagCache });
 
 				this.tagCache.set(file.path, new Set(newTags));
 				if (this.tagChanged) {
