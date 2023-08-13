@@ -63,6 +63,22 @@ export default class TagFlowPlugin extends Plugin {
 				this.addToCache();
 			})
 		);
+		this.registerEvent(
+			this.app.vault.on("delete", async (file) => {
+				if (!(file instanceof TFile)) {
+					return;
+				}
+				console.log("File Deleted: ", file.name, file.path);
+				const listToBeDeleted = this.lists.filter((tagList) => {
+					return tagList.notePath === file.path;
+				});
+
+				listToBeDeleted.forEach((list) => {
+					this.lists = this.lists.filter((l) => l !== list);
+				});
+				await this.saveData();
+			})
+		);
 		// Update the cache whenever a file is modified
 		this.registerEvent(
 			this.app.vault.on("modify", async (file) => {
@@ -111,8 +127,8 @@ export default class TagFlowPlugin extends Plugin {
 
 	async deleteList(
 		list: TagList,
-		note: TFile | undefined,
-		content: string | undefined
+		note: TFile | null,
+		content: string | null
 	) {
 		// If no file content has been passed as argument then read the file and get the file content
 		if (!content || !note) {
@@ -136,13 +152,13 @@ export default class TagFlowPlugin extends Plugin {
 					content.substring(0, startIndex) +
 					content.substring(nextLineIndex + 1);
 			}
-			await this.app.vault.modify(note, content);
 
 			// Remove the list from the plugin's lists
 			this.lists = this.lists.filter((l) => l !== list);
-
 			// Save the data
 			await this.saveData();
+			// Update the file
+			await this.app.vault.modify(note, content);
 		}
 	}
 
