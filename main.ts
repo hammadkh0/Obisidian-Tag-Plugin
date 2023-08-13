@@ -27,8 +27,6 @@ export default class TagFlowPlugin extends Plugin {
 
 	async onload() {
 		console.log("Plugin loaded");
-		await this.loadData();
-		this.allTags = await this.fetchAllTags();
 
 		// this.registerCodeMirror((cm: CodeMirror.Editor) => {
 		// 	cm.on("change", this.handleFileChange.bind(this));
@@ -57,10 +55,36 @@ export default class TagFlowPlugin extends Plugin {
 				this.updateLists();
 			}
 		});
+		this.app.workspace.onLayoutReady(async () => {
+			await this.loadData();
+			this.allTags = await this.fetchAllTags();
+		});
 		this.registerEvent(
 			this.app.vault.on("create", (file) => {
 				console.log("new file created in the vault ");
-				this.addToCache();
+				this.tagCache.set(file.path, new Set());
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				if (!(file instanceof TFile)) return;
+				// oldPath = the previous path of the file
+				// file, the new file data i.e the new name of file alongwith other properties
+				console.log("RENAME EVENT", file.basename, file.path, oldPath);
+
+				const data = this.tagCache.get(oldPath) as Set<string>;
+				this.tagCache.delete(oldPath);
+				this.tagCache.set(file.path, data);
+
+				// overwrite the file's notepath with the new path
+				this.lists = this.lists.map((tagList) => {
+					if (tagList.notePath === oldPath) {
+						tagList.notePath = file.path;
+					}
+					return tagList;
+				});
+
+				console.log("TagLists on renaming: ", this.lists);
 			})
 		);
 		this.registerEvent(
@@ -77,6 +101,11 @@ export default class TagFlowPlugin extends Plugin {
 					})
 					.filter(Boolean) as TagList[];
 
+				if (this.tagCache.has(file.path)) {
+					console.log("tagCache has this file", file.path);
+
+					this.tagCache.delete(file.path);
+				}
 				await this.saveData();
 			})
 		);
