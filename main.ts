@@ -34,8 +34,8 @@ export default class TagFlowPlugin extends Plugin {
 
 			const frontMatterTags: string = cache.frontmatter.tags;
 			const frontmatterTagsArr = frontMatterTags
-				.split(",")
-				.map((tag) => {
+				?.split(",")
+				?.map((tag) => {
 					tag = tag.trim();
 					if (tag !== "") return "#" + tag;
 				})
@@ -233,15 +233,20 @@ export default class TagFlowPlugin extends Plugin {
 		}
 	}
 
-	async fetchAllTags() {
+	fetchAllTags() {
 		const allTags = new Set<string>();
-		let match: RegExpExecArray | null;
+		// let match: RegExpExecArray | null;
 
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			const fileContent = await this.app.vault.cachedRead(file);
-			const tagRegex = /#([a-zA-Z0-9_-]+)/g;
-			while ((match = tagRegex.exec(fileContent))) {
-				allTags.add(match[1]);
+		// for (const file of this.app.vault.getMarkdownFiles()) {
+		// 	const fileContent = await this.app.vault.cachedRead(file);
+		// 	const tagRegex = /#([a-zA-Z0-9_-]+)/g;
+		// 	while ((match = tagRegex.exec(fileContent))) {
+		// 		allTags.add(match[1]);
+		// 	}
+		// }
+		for (const tagSet of this.tagCache.values()) {
+			for (const tag of tagSet) {
+				allTags.add(tag);
 			}
 		}
 		return Array.from(allTags);
