@@ -1,6 +1,6 @@
 import DeleteListModal from "modals/DeleteListModal";
 import TagSuggester from "modals/TagSuggester";
-import { Plugin, MarkdownView, TFile } from "obsidian";
+import { Plugin, MarkdownView, TFile, Notice } from "obsidian";
 
 export interface TagList {
 	tag: string;
@@ -267,9 +267,11 @@ export default class TagFlowPlugin extends Plugin {
 		startAnchor: string,
 		endAnchor: string,
 		links: string,
-		note: TFile
+		note: TFile,
+		list: TagList
 	) {
-		if (startIndex >= 0) {
+		links = links.trim();
+		if (startIndex >= 0 && links.length > 0) {
 			if (endIndex >= 0) {
 				// If the end anchor exists, replace the content between start and end anchors
 				content =
@@ -293,11 +295,15 @@ export default class TagFlowPlugin extends Plugin {
 			}
 			// ! Check modify vs process
 			await this.app.vault.modify(note, content);
+		} else {
+			// ! Remove the Tags and modify content
+			this.deleteList(list, note, content);
 		}
 	}
 
 	async updateLists() {
 		console.log("update list");
+
 		if (!this.lists.length) {
 			console.log("no lists");
 			return;
@@ -357,7 +363,8 @@ export default class TagFlowPlugin extends Plugin {
 				startAnchor,
 				endAnchor,
 				links,
-				file
+				file,
+				list
 			);
 		}
 	}
