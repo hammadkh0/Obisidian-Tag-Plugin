@@ -16,32 +16,6 @@ export default class TagFlowPlugin extends Plugin {
 	hasSelectedTag = false;
 	tagChanged = false;
 
-	async filterContent(file: TFile) {
-		const content = await this.app.vault.read(file);
-		// Define a regular expression pattern to match the anchor tags
-		const anchorTagPattern =
-			/<!--tag-list\s[^>]+-->[\s\S]*?<!--end-tag-list\s[^>]+-->/g;
-		// Remove all anchor tags using the replace() method with the pattern
-		const cleanedContent = content.replace(anchorTagPattern, "");
-		return cleanedContent;
-	}
-	getFrontmatterTags(file: TFile) {
-		let newTags: Set<string>;
-		const cache = this.app.metadataCache.getFileCache(file);
-		if (cache && cache.frontmatter) {
-			const frontMatterTags: string = cache.frontmatter.tags;
-			const frontmatterTagsArr = frontMatterTags
-				?.split(",")
-				?.map((tag) => {
-					tag = tag.trim();
-					if (tag !== "") return "#" + tag;
-				})
-				.filter(Boolean) as string[];
-
-			newTags = new Set(frontmatterTagsArr);
-		}
-		return newTags;
-	}
 	async onload() {
 		console.log("Plugin loaded");
 
@@ -136,7 +110,7 @@ export default class TagFlowPlugin extends Plugin {
 				}
 				if (file.basename === "tagFlowData") return;
 
-				const newTags = await this.getNewTagsFromFile(file);
+				const newTags = await this.processTags(file);
 
 				this.tagChanged = this.hasTagChanged(file, newTags);
 
@@ -176,25 +150,33 @@ export default class TagFlowPlugin extends Plugin {
 
 		return tagChanged;
 	}
-	async getNewTagsFromFile(file: TFile) {
-		let newTags = new Set<string>();
+	async filterContent(file: TFile) {
+		const content = await this.app.vault.read(file);
+		// Define a regular expression pattern to match the anchor tags
+		const anchorTagPattern =
+			/<!--tag-list\s[^>]+-->[\s\S]*?<!--end-tag-list\s[^>]+-->/g;
+		// Remove all anchor tags using the replace() method with the pattern
+		const cleanedContent = content.replace(anchorTagPattern, "");
+		return cleanedContent;
+	}
+
+	getFrontmatterTags(file: TFile) {
+		let newTags: Set<string>;
 		const cache = this.app.metadataCache.getFileCache(file);
-		if (cache) {
-			const tags = cache.tags?.map((tag) => tag.tag);
-			newTags = new Set(tags);
-			const fmts = this.getFrontmatterTags(file);
-			if (fmts) {
-				for (const item of fmts) {
-					newTags.add(item);
-				}
-			}
-		} else {
-			const cleanedContent = await this.filterContent(file);
-			newTags = new Set(cleanedContent.match(/#([a-zA-Z0-9_-]+)/g));
+		if (cache && cache.frontmatter) {
+			const frontMatterTags: string = cache.frontmatter.tags;
+			const frontmatterTagsArr = frontMatterTags
+				?.split(",")
+				?.map((tag) => {
+					tag = tag.trim();
+					if (tag !== "") return "#" + tag;
+				})
+				.filter(Boolean) as string[];
+
+			newTags = new Set(frontmatterTagsArr);
 		}
 		return newTags;
 	}
-
 	async deleteList(
 		list: TagList,
 		note: TFile | null,
@@ -245,15 +227,14 @@ export default class TagFlowPlugin extends Plugin {
 		// }
 		for (const tagSet of this.tagCache.values()) {
 			for (const tag of tagSet) {
-				// !check this
 				allTags.add(tag.slice(1, tag.length));
 			}
 		}
 		return Array.from(allTags);
 	}
 
-	async createTagList() {
-		this.allTags = await this.fetchAllTags();
+	createTagList() {
+		this.allTags = this.fetchAllTags();
 		if (this.allTags.length > 0) {
 			console.log("yes tags");
 			new TagSuggester(this.app, this, this.allTags).open();
@@ -450,36 +431,8 @@ export default class TagFlowPlugin extends Plugin {
 
 		await Promise.all(
 			this.app.vault.getMarkdownFiles().map(async (file) => {
-				let frontmatterTagsArr;
-
-				const cleanedContent = await this.filterContent(file);
-				const tagMatches = cleanedContent.match(/#([a-zA-Z0-9_-]+)/g);
-
-				const frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
-				const fmMatch = cleanedContent.match(frontMatterRegex);
-				if (fmMatch) {
-					const frontMatterString = fmMatch[1];
-					const frontMatter = loadYAML(frontMatterString);
-					frontmatterTagsArr = frontMatter.tags
-						?.split(",")
-						?.map((tag: string) => {
-							tag = tag.trim();
-							if (tag !== "") return "#" + tag;
-						})
-						.filter(Boolean) as string[];
-				}
 				const notePath = file.path;
-				let combinedTags;
-				if (tagMatches) {
-					if (frontmatterTagsArr !== undefined) {
-						combinedTags = new Set([
-							...tagMatches,
-							...frontmatterTagsArr,
-						]);
-					} else {
-						combinedTags = new Set([...tagMatches]);
-					}
-				}
+				const combinedTags = await this.processTags(file);
 				tagMap.set(notePath, new Set(combinedTags));
 			})
 		);
@@ -487,6 +440,35 @@ export default class TagFlowPlugin extends Plugin {
 		console.log(this.tagCache);
 	}
 
+	async processTags(file: TFile) {
+		let frontmatterTagsArr;
+
+		const cleanedContent = await this.filterContent(file);
+		const tagMatches = cleanedContent.match(/#([a-zA-Z0-9_-]+)/g);
+
+		const frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+		const fmMatch = cleanedContent.match(frontMatterRegex);
+		if (fmMatch) {
+			const frontMatterString = fmMatch[1];
+			const frontMatter = loadYAML(frontMatterString);
+			frontmatterTagsArr = frontMatter.tags
+				?.split(",")
+				?.map((tag: string) => {
+					tag = tag.trim();
+					if (tag !== "") return "#" + tag;
+				})
+				.filter(Boolean) as string[];
+		}
+		let combinedTags: Set<string> = new Set();
+		if (tagMatches && frontmatterTagsArr) {
+			combinedTags = new Set([...tagMatches, ...frontmatterTagsArr]);
+		} else if (tagMatches) {
+			combinedTags = new Set([...tagMatches]);
+		} else if (frontmatterTagsArr) {
+			combinedTags = new Set([...frontmatterTagsArr]);
+		}
+		return combinedTags;
+	}
 	onunload() {
 		console.log("unloading plugin");
 	}
