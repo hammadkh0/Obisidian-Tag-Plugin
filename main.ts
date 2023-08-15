@@ -1,6 +1,7 @@
+import { load as loadYAML } from "js-yaml";
 import DeleteListModal from "modals/DeleteListModal";
 import TagSuggester from "modals/TagSuggester";
-import { Plugin, MarkdownView, TFile, Notice } from "obsidian";
+import { Plugin, MarkdownView, TFile } from "obsidian";
 
 export interface TagList {
 	tag: string;
@@ -28,10 +29,6 @@ export default class TagFlowPlugin extends Plugin {
 		let newTags: Set<string>;
 		const cache = this.app.metadataCache.getFileCache(file);
 		if (cache && cache.frontmatter) {
-			// Your code here
-			console.log("Updated Frontmatter: ", cache.frontmatter);
-			console.log("Cache file tags: ", cache.tags);
-
 			const frontMatterTags: string = cache.frontmatter.tags;
 			const frontmatterTagsArr = frontMatterTags
 				?.split(",")
@@ -41,9 +38,7 @@ export default class TagFlowPlugin extends Plugin {
 				})
 				.filter(Boolean) as string[];
 
-			console.log({ frontMatterTags });
 			newTags = new Set(frontmatterTagsArr);
-			console.log("After frontmater tags added to cache, ", newTags);
 		}
 		return newTags;
 	}
@@ -65,31 +60,23 @@ export default class TagFlowPlugin extends Plugin {
 			callback: () => this.createTagList(),
 		});
 
-		this.app.workspace.on("active-leaf-change", () => {
-			// console.log("active-leaf-change");
-			// this.updateLists();
+		this.app.workspace.on("active-leaf-change", (leaf) => {
+			console.log("active-leaf-change");
+			this.updateLists();
 		});
-		// this.app.workspace.on("file-open", (file) => {
-		// 	if (file) {
-		// 		for (const item of this.getFrontmatterTags(file)) {
-		// 			this.tagCache.get(file.path)?.add(item);
-		// 		}
-		// 	}
-		// });
+
+		// this.app.workspace.on("file-open", (file) => {});
+
 		this.app.workspace.on("layout-change", () => {
 			if (this.app.workspace.getLeavesOfType("graph").length > 0) {
 				console.log("layout-change");
 				this.updateLists();
 			}
 		});
-		this.app.workspace.onLayoutReady(async () => {});
-
-		this.registerEvent(
-			this.app.metadataCache.on("resolved", async () => {
-				await this.loadData();
-				this.allTags = await this.fetchAllTags();
-			})
-		);
+		this.app.workspace.onLayoutReady(async () => {
+			await this.loadData();
+			this.allTags = this.fetchAllTags();
+		});
 
 		this.registerEvent(
 			this.app.vault.on("create", (file) => {
@@ -149,38 +136,12 @@ export default class TagFlowPlugin extends Plugin {
 				}
 				if (file.basename === "tagFlowData") return;
 
-				let newTags;
-				const cache = this.app.metadataCache.getFileCache(file);
-				if (cache) {
-					const tags = cache.tags?.map((tag) => tag.tag);
-					newTags = new Set(tags);
-				} else {
-					const cleanedContent = await this.filterContent(file);
-					newTags = new Set(
-						cleanedContent.match(/#([a-zA-Z0-9_-]+)/g)
-					);
-				}
-				for (const item of this.getFrontmatterTags(file)) {
-					newTags.add(item);
-				}
-				// Check if any tag has been changed
-				const oldTags = this.tagCache.get(file.path);
-				this.tagChanged = false;
+				const newTags = await this.getNewTagsFromFile(file);
 
-				if (oldTags) {
-					// iterate through the tags in the tag cache for the currently modified file
-					for (const newTag of newTags) {
-						if (!oldTags.has(newTag)) {
-							this.tagChanged = true;
-							break;
-						}
-					}
-				}
-				console.log({ newTags, oldTags });
-				console.log({ lists: this.lists });
-				console.log({ tagCache: this.tagCache });
+				this.tagChanged = this.hasTagChanged(file, newTags);
 
 				this.tagCache.set(file.path, new Set(newTags));
+
 				if (this.tagChanged) {
 					console.log("tag changed");
 					this.updateLists();
@@ -194,6 +155,44 @@ export default class TagFlowPlugin extends Plugin {
 		setInterval(() => {
 			this.updateLists();
 		}, 60 * 60 * 1000);
+	}
+
+	hasTagChanged(file: TFile, newTags: Set<string>) {
+		let tagChanged = false;
+		// Check if any tag has been changed
+		const oldTags = this.tagCache.get(file.path);
+		if (oldTags) {
+			// iterate through the tags in the tag cache for the currently modified file
+			for (const newTag of newTags) {
+				if (!oldTags.has(newTag)) {
+					tagChanged = true;
+					break;
+				}
+			}
+		}
+		console.log({ newTags, oldTags });
+		console.log({ lists: this.lists });
+		console.log({ tagCache: this.tagCache });
+
+		return tagChanged;
+	}
+	async getNewTagsFromFile(file: TFile) {
+		let newTags = new Set<string>();
+		const cache = this.app.metadataCache.getFileCache(file);
+		if (cache) {
+			const tags = cache.tags?.map((tag) => tag.tag);
+			newTags = new Set(tags);
+			const fmts = this.getFrontmatterTags(file);
+			if (fmts) {
+				for (const item of fmts) {
+					newTags.add(item);
+				}
+			}
+		} else {
+			const cleanedContent = await this.filterContent(file);
+			newTags = new Set(cleanedContent.match(/#([a-zA-Z0-9_-]+)/g));
+		}
+		return newTags;
 	}
 
 	async deleteList(
@@ -246,7 +245,8 @@ export default class TagFlowPlugin extends Plugin {
 		// }
 		for (const tagSet of this.tagCache.values()) {
 			for (const tag of tagSet) {
-				allTags.add(tag);
+				// !check this
+				allTags.add(tag.slice(1, tag.length));
 			}
 		}
 		return Array.from(allTags);
@@ -447,31 +447,42 @@ export default class TagFlowPlugin extends Plugin {
 
 	async addToCache() {
 		const tagMap = new Map<string, Set<string>>();
-		let newTags: Set<string>;
-		this.app.vault.getMarkdownFiles().map((file) => {
-			const cache = this.app.metadataCache.getFileCache(file);
-			if (cache) {
-				const tags = cache.tags?.map((tag) => tag.tag);
-				newTags = new Set(tags);
-			}
-			const frontmatterTags = this.getFrontmatterTags(file);
 
-			console.log(
-				"🚀 ~ file: main.ts:460 ~ TagFlowPlugin ~ this.app.vault.getMarkdownFiles ~ frontmatterTags:",
-				frontmatterTags
-			);
-			const notePath = file.path;
+		await Promise.all(
+			this.app.vault.getMarkdownFiles().map(async (file) => {
+				let frontmatterTagsArr;
 
-			// Combine matchesSet and frontMatterTags into a single Set
-			let combinedTags;
-			if (frontmatterTags !== undefined) {
-				combinedTags = new Set([...newTags, ...frontmatterTags]);
-			} else {
-				combinedTags = new Set([...newTags]);
-			}
-			tagMap.set(notePath, new Set(combinedTags));
-		});
+				const cleanedContent = await this.filterContent(file);
+				const tagMatches = cleanedContent.match(/#([a-zA-Z0-9_-]+)/g);
 
+				const frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
+				const fmMatch = cleanedContent.match(frontMatterRegex);
+				if (fmMatch) {
+					const frontMatterString = fmMatch[1];
+					const frontMatter = loadYAML(frontMatterString);
+					frontmatterTagsArr = frontMatter.tags
+						?.split(",")
+						?.map((tag: string) => {
+							tag = tag.trim();
+							if (tag !== "") return "#" + tag;
+						})
+						.filter(Boolean) as string[];
+				}
+				const notePath = file.path;
+				let combinedTags;
+				if (tagMatches) {
+					if (frontmatterTagsArr !== undefined) {
+						combinedTags = new Set([
+							...tagMatches,
+							...frontmatterTagsArr,
+						]);
+					} else {
+						combinedTags = new Set([...tagMatches]);
+					}
+				}
+				tagMap.set(notePath, new Set(combinedTags));
+			})
+		);
 		this.tagCache = tagMap;
 		console.log(this.tagCache);
 	}
