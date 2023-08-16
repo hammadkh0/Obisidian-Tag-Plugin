@@ -137,11 +137,11 @@ export default class TagFlowPlugin extends Plugin {
 		const oldTags = this.tagCache.get(file.path);
 		if (oldTags) {
 			// iterate through the tags in the tag cache for the currently modified file
-			for (const newTag of newTags) {
-				if (!oldTags.has(newTag)) {
-					tagChanged = true;
-					break;
-				}
+			tagChanged = [...newTags].some((element) => !oldTags.has(element));
+			if (tagChanged) {
+				console.log("True for tag change");
+			} else {
+				console.log("Not true for tag change");
 			}
 		}
 		console.log({ newTags, oldTags });
@@ -161,7 +161,7 @@ export default class TagFlowPlugin extends Plugin {
 	}
 
 	getFrontmatterTags(file: TFile) {
-		let newTags: Set<string>;
+		let newTags: Set<string> = new Set();
 		const cache = this.app.metadataCache.getFileCache(file);
 		if (cache && cache.frontmatter) {
 			const frontMatterTags: string = cache.frontmatter.tags;
@@ -448,9 +448,11 @@ export default class TagFlowPlugin extends Plugin {
 
 		const frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/;
 		const fmMatch = cleanedContent.match(frontMatterRegex);
-		if (fmMatch) {
+		if (fmMatch && cleanedContent.startsWith(fmMatch[0])) {
+			console.log("frontmatter exists");
+
 			const frontMatterString = fmMatch[1];
-			const frontMatter = loadYAML(frontMatterString);
+			const frontMatter: any = loadYAML(frontMatterString);
 			frontmatterTagsArr = frontMatter.tags
 				?.split(",")
 				?.map((tag: string) => {
