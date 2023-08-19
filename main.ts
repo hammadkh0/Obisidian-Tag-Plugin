@@ -358,7 +358,7 @@ export default class TagFlowPlugin extends Plugin {
 			console.log({ filesWithTag });
 
 			const links = filesWithTag
-				.map((file) => `[[${file.basename}]]`)
+				.map((file) => `- [[${file.basename}]]`)
 				.join("\n");
 
 			// * Read the contents of the currently opened file
